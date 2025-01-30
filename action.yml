@@ -52,9 +52,10 @@ runs:
         CI_COMMIT_MESSAGE: "Update App Version to"
         CI_COMMIT_AUTHOR: "Continuous Deployment"
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
+        APP: "${{ inputs.app }}"
       run: |
         git config --global user.name "${CI_COMMIT_AUTHOR}"
         git config --global user.email "hub-devops@myriadgroup.com"
         git add Chart.yaml
-        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in Chart.yaml"
+        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in Chart.yaml for ${APP}"
         git push origin HEAD
