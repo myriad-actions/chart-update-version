@@ -33,7 +33,7 @@ runs:
     - name: Download chart
       uses: actions/checkout@v4
       with:
-        repository: "${{ inputs.organisation_repos }}"/"${{ inputs.gitops_repos }}"
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_repos }}"
         path: "${{ inputs.gitops_repos }}"
         token: "${{ inputs.gh_pat }}"
 
