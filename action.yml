@@ -47,7 +47,7 @@ runs:
 
     - name: Push Commit for CD on Rancher
       shell: bash
-      working-directory: ${{ inputs.gitops_repos }}/environment/${{ inputs.env }}/${{ inputs.app }}
+      working-directory: ${{ inputs.gitops_repos }}/${{ inputs.env }}/${{ inputs.app }}
       env:
         CI_COMMIT_MESSAGE: "Update App Version to"
         CI_COMMIT_AUTHOR: "Continuous Deployment"
