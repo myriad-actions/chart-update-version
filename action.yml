@@ -39,7 +39,7 @@ runs:
 
     - name: Update App's version in Chart.yaml
       shell: bash
-      working-directory: ${{ inputs.gitops_repos }}/environment/${{ inputs.env }}/${{ inputs.app }}
+      working-directory: ${{ inputs.gitops_repos }}/${{ inputs.env }}/${{ inputs.app }}
       env:
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
       run: |
