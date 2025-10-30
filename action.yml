@@ -3,6 +3,16 @@ name: Helm Update Chart
 description: Updates the application version in Chart.yaml and pushes the change to the repository.
 
 inputs:
+  iam-role-aws:
+    description: 'The IAM role to assume for AWS credentials.'
+    required: true
+  aws-region:
+    description: 'The AWS region to use.'
+    required: true
+    default: 'eu-west-1'
+  role:
+    description: "IAM Role to use for ECR"
+    required: true
   env:
     description: "Deployment environment"
     required: true
@@ -18,36 +28,72 @@ inputs:
   gh_pat:
     description: "GitHub Personal Access Token"
     required: true
-  gitops_repos:
-    description: "Gihub repo for chart.yml"
+  gitops_chart_repos:
+    description: "Github helm repos repository"
+    required: true
+  gitops_cd_repos:
+    description: "Github CD repository"
     required: true
   organisation_repos:
     description: "Github Organization"
     required: true
   
-  
-
 runs:
   using: "composite"
   steps:
-    - name: Download chart
-      uses: actions/checkout@v4
+    - name: Install Helm
+      uses: azure/setup-helm@v4
       with:
-        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_repos }}"
-        path: "${{ inputs.gitops_repos }}"
+        version: 'v3.19.0'
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v5 # More information on this action can be found below in the 'AWS Credentials' section
+      with:
+        role-to-assume: ${{ inputs.role }}
+        aws-region: ${{ inputs.region }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    # Checkout Helm repo repository
+    - name: Checkout GitOps repository
+      uses: actions/checkout@v5
+      with:
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_chart_repos }}"
+        path: "${{ inputs.gitops_chart_repos }}"
+        token: "${{ inputs.gh_pat }}"
+
+    # Checkout FLux repo repository
+    - name: Checkout GitOps repository
+      uses: actions/checkout@v5
+      with:
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_cd_repos }}"
+        path: "${{ inputs.gitops_cd_repos }}"
         token: "${{ inputs.gh_pat }}"
 
     - name: Update App's version in Chart.yaml
       shell: bash
-      working-directory: ${{ inputs.gitops_repos }}/${{ inputs.env }}/${{ inputs.app }}
+      working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
       run: |
         sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" Chart.yaml
-
-    - name: Push Commit for CD on Rancher
+        sed -i "s/^version: .*/version: \"${VERSION}\"/" Chart.yaml
+      
+    - name: Package and push helm chart to Amazon ECR
       shell: bash
-      working-directory: ${{ inputs.gitops_repos }}/${{ inputs.env }}/${{ inputs.app }}
+      working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
+      env:
+        VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
+      run: |
+        helm lint .
+        helm package .
+        helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}
+
+    - name: Update Chart.yaml in CD repository and push changes
+      shell: bash
+      working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
         CI_COMMIT_MESSAGE: "Update App Version to"
         CI_COMMIT_AUTHOR: "Continuous Deployment"
@@ -56,6 +102,7 @@ runs:
       run: |
         git config --global user.name "${CI_COMMIT_AUTHOR}"
         git config --global user.email "hub-devops@myriadgroup.com"
-        git add Chart.yaml
-        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in Chart.yaml for ${APP}"
+        yq -i ".spec.chart.spec.version = \"${VERSION}\"" HelmRelease.yaml
+        git add HelmRelease.yaml
+        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in HelmRelease.yaml for ${APP}"
         git push origin HEAD
