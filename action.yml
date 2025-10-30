@@ -65,7 +65,7 @@ runs:
         token: "${{ inputs.gh_pat }}"
 
     # Checkout FLux repo repository
-    - name: Checkout GitOps repository
+    - name: Checkout CD repository
       uses: actions/checkout@v5
       with:
         repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_cd_repos }}"
