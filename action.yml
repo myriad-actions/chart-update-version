@@ -102,7 +102,7 @@ runs:
       run: |
         git config --global user.name "${CI_COMMIT_AUTHOR}"
         git config --global user.email "hub-devops@myriadgroup.com"
-        sed -i "s/^version:.*/version: \"${VERSION}\"/" HelmRelease.yaml
-        git add HelmRelease.yaml
-        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in HelmRelease.yaml for ${APP}"
+        sed -i "s/^version:.*/version: \"${VERSION}\"/" release.yaml
+        git add release.yaml
+        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in release.yaml for ${APP}"
         git push origin HEAD
