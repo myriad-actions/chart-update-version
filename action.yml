@@ -91,6 +91,15 @@ runs:
         helm package .
         helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}
 
+    - name: Set chart version
+      shell: bash
+      working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
+      env:
+        VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
+      run: |
+        echo "set chart version to ${VERSION}"
+        yq eval --inplace ".spec.chart.spec.version = \"${VERSION}\"" release.yaml
+
     - name: Update Chart.yaml in CD repository and push changes
       shell: bash
       working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
@@ -102,7 +111,13 @@ runs:
       run: |
         git config --global user.name "${CI_COMMIT_AUTHOR}"
         git config --global user.email "hub-devops@myriadgroup.com"
-        sed -i "s/^version:.*/version: \"${VERSION}\"/" release.yaml
         git add release.yaml
-        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in release.yaml for ${APP}"
-        git push origin HEAD
+
+        # Commit only if there is staged change
+        if git diff --cached --quiet; then
+          echo "No changes detected in release.yaml | skipping commit."
+        else
+          git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in release.yaml for ${APP}"
+          git push origin HEAD
+          echo "release.yaml updated and pushed with version ${VERSION}."
+        fi  
