@@ -45,10 +45,6 @@ runs:
       uses: azure/setup-helm@v4
       with:
         version: 'v3.19.0'
-        
-     # yq is a command-line YAML processor
-    - name: Install yq
-      uses: mikefarah/yq@v4
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v5 # More information on this action can be found below in the 'AWS Credentials' section
@@ -95,14 +91,13 @@ runs:
         helm package .
         helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}
 
-    - name: Install yq / Set chart version
+    - name: Set chart version
       uses: mikefarah/yq@v4
-      working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       with:
-        cmd: yq eval --inplace ".spec.chart.spec.version = \"${VERSION}\"" release.yaml
+        cmd: yq -i '.spec.chart.spec.version = strenv(VERSION)' '${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}/release.yaml'
       env:
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
-
+        
     - name: Update Chart.yaml in CD repository and push changes
       shell: bash
       working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
