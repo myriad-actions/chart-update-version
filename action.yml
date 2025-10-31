@@ -95,14 +95,13 @@ runs:
         helm package .
         helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}
 
-    - name: Set chart version
-      shell: bash
+    - name: Install yq / Set chart version
+      uses: mikefarah/yq@v4
       working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
+      with:
+        cmd: yq eval --inplace ".spec.chart.spec.version = \"${VERSION}\"" release.yaml
       env:
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
-      run: |
-        echo "set chart version to ${VERSION}"
-        yq eval --inplace ".spec.chart.spec.version = \"${VERSION}\"" release.yaml
 
     - name: Update Chart.yaml in CD repository and push changes
       shell: bash
