@@ -89,7 +89,7 @@ runs:
       run: |
         helm lint .
         helm package .
-        helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}
+        helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}/helm
 
     - name: Set chart version
       uses: mikefarah/yq@v4
