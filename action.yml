@@ -10,9 +10,6 @@ inputs:
     description: 'The AWS region to use.'
     required: true
     default: 'eu-west-1'
-  role:
-    description: "IAM Role to use for ECR"
-    required: true
   env:
     description: "Deployment environment"
     required: true
