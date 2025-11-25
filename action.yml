@@ -34,7 +34,12 @@ inputs:
   organisation_repos:
     description: "Github Organization"
     required: true
-  
+
+outputs:
+  approval-status:
+    description: "Final approval status"
+    value: ${{ steps.approval.outputs.approval-status }}
+
 runs:
   using: "composite"
   steps:
