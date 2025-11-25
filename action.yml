@@ -35,11 +35,6 @@ inputs:
     description: "Github Organization"
     required: true
 
-outputs:
-  approval-status:
-    description: "Final approval status"
-    value: ${{ steps.approval.outputs.approval-status }}
-
 runs:
   using: "composite"
   steps:
@@ -125,6 +120,7 @@ runs:
     # Uses CODEOWNERS + additional devops-it user
     # ------------------------------
     - name: Approval
+      id: approval
       if: ${{ inputs.env == 'prod' }}
       uses: trstringer/manual-approval@v1
       with:
