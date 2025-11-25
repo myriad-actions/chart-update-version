@@ -139,7 +139,7 @@ runs:
     # Always executed for demo and others (after approval if non-demo)
     # ------------------------------
     - name: Update App's version in Chart.yaml
-      if: ${{ inputs.env == 'demo' || steps.approval.conclusion == 'approved' }}
+      if: ${{ inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved' }}
       shell: bash
       working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
@@ -153,7 +153,7 @@ runs:
     # Only executed after approval for non-demo
     # ------------------------------
     - name: Package and push helm chart to Amazon ECR
-      if: ${{ inputs.env == 'prod' && steps.approval.conclusion == 'approved' }}
+      if: ${{ inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved' }}
       shell: bash
       working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
@@ -168,7 +168,7 @@ runs:
     # Only executed for prod
     # ------------------------------
     - name: Set chart version
-      if: ${{ inputs.env == 'prod' && steps.approval.conclusion == 'approved' }}
+      if: ${{ inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved' }}
       uses: mikefarah/yq@v4
       with:
         cmd: yq -i '.spec.chart.spec.version = strenv(VERSION)' '${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}/release.yaml'
@@ -180,7 +180,7 @@ runs:
     # Only executed for prod
     # ------------------------------    
     - name: Update Chart.yaml in CD repository and push changes
-      if: ${{ inputs.env == 'prod' && steps.approval.conclusion == 'approved' }}
+      if: ${{ inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved' }}
       shell: bash
       working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
