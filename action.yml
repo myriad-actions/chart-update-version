@@ -61,6 +61,16 @@ runs:
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
+    
+    # ------------------------------
+    # Checkout the App repo
+    # ------------------------------
+    - name: Checkout GitOps repository
+      uses: actions/checkout@v5
+      with:
+        repository: "${{ inputs.app }}"
+        path: "${{ inputs.app }}"
+        token: "${{ inputs.gh_pat }}"
 
     # ------------------------------
     # Checkout the GitOps Helm chart repository
@@ -88,6 +98,7 @@ runs:
     # ------------------------------
     - name: Parse CODEOWNERS from .github folder
       if: ${{ inputs.env == 'prod' }}
+      working-directory: ${{ inputs.app }}
       id: codeowners  
       run: |
         CODEOWNERS_FILE=".github/CODEOWNERS"
