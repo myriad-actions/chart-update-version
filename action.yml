@@ -68,8 +68,8 @@ runs:
     - name: Checkout GitOps repository
       uses: actions/checkout@v5
       with:
-        repository: "${{ inputs.app }}"
-        path: "${{ inputs.organisation_repos }}/${{ inputs.app }}"
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.app }}"
+        path: "${{ inputs.app }}"
         token: "${{ inputs.gh_pat }}"
 
     # ------------------------------
