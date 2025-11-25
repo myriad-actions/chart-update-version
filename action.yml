@@ -38,22 +38,33 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # ------------------------------
+    # Install Helm CLI
+    # ------------------------------
     - name: Install Helm
       uses: azure/setup-helm@v4
       with:
         version: 'v3.19.0'
     
+    # ------------------------------
+    # Configure AWS credentials to assume role
+    # ------------------------------
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v5 # More information on this action can be found below in the 'AWS Credentials' section
       with:
         role-to-assume: ${{ inputs.iam-role-aws }}
         aws-region: ${{ inputs.aws-region }}
     
+    # ------------------------------
+    # Login to Amazon ECR (for Helm OCI registry)
+    # ------------------------------
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # Checkout Helm repo repository
+    # ------------------------------
+    # Checkout the GitOps Helm chart repository
+    # ------------------------------
     - name: Checkout GitOps repository
       uses: actions/checkout@v5
       with:
@@ -61,7 +72,9 @@ runs:
         path: "${{ inputs.gitops_chart_repos }}"
         token: "${{ inputs.gh_pat }}"
 
-    # Checkout FLux repo repository
+    # ------------------------------
+    # Checkout the CD repository (release manifests)
+    # ------------------------------
     - name: Checkout CD repository
       uses: actions/checkout@v5
       with:
@@ -69,7 +82,53 @@ runs:
         path: "${{ inputs.gitops_cd_repos }}"
         token: "${{ inputs.gh_pat }}"
 
+    # ------------------------------
+    # Parse CODEOWNERS to find approvers
+    # Only if not demo environment
+    # ------------------------------
+    - name: Parse CODEOWNERS from .github folder
+      if: ${{ inputs.env != 'demo' }}
+      id: codeowners  
+      run: |
+        CODEOWNERS_FILE=".github/CODEOWNERS"
+        if [ ! -f "$CODEOWNERS_FILE" ]; then
+          echo " CODEOWNERS file not found in .github/"
+          exit 1
+        fi
+
+        # Extract approvers from CODEOWNERS
+        APPROVERS=$(grep -o '@[^ ]*' "$CODEOWNERS_FILE" | sed 's/@//g' | paste -sd "," -)
+        echo "Approvers found: $APPROVERS"
+        # Save output
+        echo "approvers=$APPROVERS" >> $GITHUB_OUTPUT
+      shell: bash
+    
+    # ------------------------------
+    # Manual approval step
+    # Only triggered if not demo
+    # Uses CODEOWNERS + additional devops-it user
+    # ------------------------------
+    - name: Approval
+      if: ${{ inputs.env != 'demo' }}
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: "${{ inputs.gh_pat }}"
+        approvers: "${{ steps.codeowners.outputs.approvers }},devops-it"
+        minimum-approvals: 1
+        issue-title: "${{ inputs.app }} Deploying version ${{ inputs.app_version }}-${{ inputs.short_sha }}"
+        issue-body: "Please approve or deny the deployment of version ${{ inputs.app_version }}-${{ inputs.short_sha }}."
+        exclude-workflow-initiator-as-approver: false
+        fail-on-denial: true
+        additional-approved-words: ''
+        additional-denied-words: ''
+        polling-interval-seconds: 10
+
+    # ------------------------------
+    # Update application's Chart.yaml
+    # Always executed for demo and others (after approval if non-demo)
+    # ------------------------------
     - name: Update App's version in Chart.yaml
+      if: ${{ inputs.env == 'demo' || steps.approval.conclusion == 'approved' }}
       shell: bash
       working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
@@ -78,7 +137,12 @@ runs:
         sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" Chart.yaml
         sed -i "s/^version: .*/version: \"${VERSION}\"/" Chart.yaml
       
+    # ------------------------------
+    # Package and push Helm chart to Amazon ECR
+    # Only executed after approval for non-demo
+    # ------------------------------
     - name: Package and push helm chart to Amazon ECR
+      if: ${{ inputs.env == 'demo' || steps.approval.conclusion == 'approved' }}
       shell: bash
       working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
@@ -88,14 +152,24 @@ runs:
         helm package .
         helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}/helm
 
+    # ------------------------------
+    # Set chart version in CD release.yaml
+    # Only executed after approval for non-demo
+    # ------------------------------
     - name: Set chart version
+      if: ${{ inputs.env == 'demo' || steps.approval.conclusion == 'approved' }}
       uses: mikefarah/yq@v4
       with:
         cmd: yq -i '.spec.chart.spec.version = strenv(VERSION)' '${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}/release.yaml'
       env:
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
-        
+      
+    # ------------------------------
+    # Set chart version in CD release.yaml
+    # Only executed after approval for non-demo
+    # ------------------------------    
     - name: Update Chart.yaml in CD repository and push changes
+      if: ${{ inputs.env == 'demo' || steps.approval.conclusion == 'approved' }}
       shell: bash
       working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
