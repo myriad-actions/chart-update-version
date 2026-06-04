@@ -3,6 +3,13 @@ name: Helm Update Chart
 description: Updates the application version in Chart.yaml and pushes the change to the repository.
 
 inputs:
+  iam-role-aws:
+    description: 'The IAM role to assume for AWS credentials.'
+    required: true
+  aws-region:
+    description: 'The AWS region to use.'
+    required: true
+    default: 'eu-west-1'
   env:
     description: "Deployment environment"
     required: true
@@ -18,36 +25,169 @@ inputs:
   gh_pat:
     description: "GitHub Personal Access Token"
     required: true
-  gitops_repos:
-    description: "Gihub repo for chart.yml"
+  gitops_chart_repos:
+    description: "Github helm repos repository"
+    required: true
+  gitops_cd_repos:
+    description: "Github CD repository"
     required: true
   organisation_repos:
     description: "Github Organization"
     required: true
-  
-  
 
 runs:
   using: "composite"
   steps:
-    - name: Download chart
-      uses: actions/checkout@v4
+    # ------------------------------
+    # Install Helm CLI
+    # ------------------------------
+    - name: Install Helm
+      uses: azure/setup-helm@v5
       with:
-        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_repos }}"
-        path: "${{ inputs.gitops_repos }}"
+        version: 'v3.19.0'
+    
+    # ------------------------------
+    # Configure AWS credentials to assume role
+    # ------------------------------
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v6 # More information on this action can be found below in the 'AWS Credentials' section
+      with:
+        role-to-assume: ${{ inputs.iam-role-aws }}
+        aws-region: ${{ inputs.aws-region }}
+    
+    # ------------------------------
+    # Login to Amazon ECR (for Helm OCI registry)
+    # ------------------------------
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    # ------------------------------
+    # Checkout the App repo
+    # ------------------------------
+    - name: Checkout GitOps repository
+      uses: actions/checkout@v5
+      with:
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.app }}"
+        path: "${{ inputs.app }}"
         token: "${{ inputs.gh_pat }}"
 
-    - name: Update App's version in Chart.yaml
+    # ------------------------------
+    # Checkout the GitOps Helm chart repository
+    # ------------------------------
+    - name: Checkout GitOps repository
+      uses: actions/checkout@v5
+      with:
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_chart_repos }}"
+        path: "${{ inputs.gitops_chart_repos }}"
+        token: "${{ inputs.gh_pat }}"
+
+    # ------------------------------
+    # Checkout the CD repository (release manifests)
+    # ------------------------------
+    - name: Checkout CD repository
+      uses: actions/checkout@v5
+      with:
+        repository: "${{ inputs.organisation_repos }}/${{ inputs.gitops_cd_repos }}"
+        path: "${{ inputs.gitops_cd_repos }}"
+        token: "${{ inputs.gh_pat }}"
+
+    # ------------------------------
+    # Parse CODEOWNERS to find approvers
+    # Only triggered if env is 'prod'
+    # ------------------------------
+    - name: Parse CODEOWNERS from .github folder
+      if: ${{ inputs.env == 'prod' }}
+      working-directory: ${{ inputs.app }}
+      id: codeowners  
+      run: |
+        CODEOWNERS_FILE=".github/CODEOWNERS"
+        if [ ! -f "$CODEOWNERS_FILE" ]; then
+          echo " CODEOWNERS file not found in .github/"
+          exit 1
+        fi
+
+        # Extract approvers from CODEOWNERS
+        APPROVERS=$(grep -o '@[^ ]*' "$CODEOWNERS_FILE" | sed 's/@//g' | paste -sd "," -)
+        echo "Approvers found: $APPROVERS"
+        # Save output
+        echo "approvers=$APPROVERS" >> $GITHUB_OUTPUT
       shell: bash
-      working-directory: ${{ inputs.gitops_repos }}/${{ inputs.env }}/${{ inputs.app }}
+    
+    # ------------------------------
+    # Manual approval step
+    # Only triggered if env is 'prod'
+    # Uses CODEOWNERS + additional devops-it user
+    # ------------------------------
+    - name: Approval
+      id: approval
+      if: ${{ inputs.env == 'prod' }}
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: "${{ inputs.gh_pat }}"
+        approvers: "${{ steps.codeowners.outputs.approvers }},devops-it"
+        minimum-approvals: 1
+        issue-title: "${{ inputs.app }} Deploying version ${{ inputs.app_version }}-${{ inputs.short_sha }}"
+        issue-body: "Please approve or deny the deployment of version ${{ inputs.app_version }}-${{ inputs.short_sha }}."
+        exclude-workflow-initiator-as-approver: false
+        fail-on-denial: true
+        additional-approved-words: ''
+        additional-denied-words: ''
+        polling-interval-seconds: 10
+
+    # ------------------------------
+    # Update application's Chart.yaml
+    # Always executed for demo and others 
+    # Only executed after approval for prod
+    # ------------------------------
+    - name: Update App's version in Chart.yaml
+      if: ${{ inputs.env != 'prod' || (inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved') }}
+      shell: bash
+      working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
         VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
       run: |
         sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" Chart.yaml
-
-    - name: Push Commit for CD on Rancher
+        sed -i "s/^version: .*/version: \"${VERSION}\"/" Chart.yaml
+      
+    # ------------------------------
+    # Package and push Helm chart to Amazon ECR
+    # Always executed for demo and others 
+    # Only executed after approval for prod
+    # ------------------------------
+    - name: Package and push helm chart to Amazon ECR
+      if: ${{ inputs.env != 'prod' || (inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved') }}
       shell: bash
-      working-directory: ${{ inputs.gitops_repos }}/${{ inputs.env }}/${{ inputs.app }}
+      working-directory: ${{ inputs.gitops_chart_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
+      env:
+        VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
+      run: |
+        helm lint .
+        helm package .
+        helm push ./${{ inputs.app }}-${VERSION}.tgz oci://${{ steps.login-ecr.outputs.registry }}/helm
+
+    # ------------------------------
+    # Set chart version in CD release.yaml
+    # Always executed for demo and others 
+    # Only executed after approval for prod
+    # ------------------------------
+    - name: Set chart version
+      if: ${{ inputs.env != 'prod' || (inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved') }}
+      uses: mikefarah/yq@v4
+      with:
+        cmd: yq -i '.spec.chart.spec.version = strenv(VERSION)' '${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}/release.yaml'
+      env:
+        VERSION: "${{ inputs.app_version }}-${{ inputs.short_sha }}"
+      
+    # ------------------------------
+    # Set chart version in CD release.yaml
+    # Always executed for demo and others 
+    # Only executed after approval for prod
+    # ------------------------------    
+    - name: Update Chart.yaml in CD repository and push changes
+      if: ${{ inputs.env != 'prod' || (inputs.env == 'prod' && steps.approval.outputs.approval-status == 'approved') }}
+      shell: bash
+      working-directory: ${{ inputs.gitops_cd_repos }}/apps/${{ inputs.env }}/${{ inputs.app }}
       env:
         CI_COMMIT_MESSAGE: "Update App Version to"
         CI_COMMIT_AUTHOR: "Continuous Deployment"
@@ -56,6 +196,13 @@ runs:
       run: |
         git config --global user.name "${CI_COMMIT_AUTHOR}"
         git config --global user.email "hub-devops@myriadgroup.com"
-        git add Chart.yaml
-        git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in Chart.yaml for ${APP}"
-        git push origin HEAD
+        git add release.yaml
+
+        # Commit only if there is staged change
+        if git diff --cached --quiet; then
+          echo "No changes detected in release.yaml | skipping commit."
+        else
+          git commit -m "${CI_COMMIT_MESSAGE} ${VERSION} in release.yaml for ${APP}"
+          git push origin HEAD
+          echo "release.yaml updated and pushed with version ${VERSION}."
+        fi  
